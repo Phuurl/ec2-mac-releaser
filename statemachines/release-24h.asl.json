@@ -1,0 +1,133 @@
+{
+  "Comment": "Release dedicated host after 24hrs",
+  "StartAt": "waitSeconds Presence Check",
+  "States": {
+    "waitSeconds Presence Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.waitSeconds",
+          "IsPresent": true,
+          "Next": "Wait"
+        }
+      ],
+      "Default": "waitSeconds 24hr default"
+    },
+    "waitSeconds 24hr default": {
+      "Type": "Pass",
+      "Next": "Wait",
+      "Result": 86400,
+      "ResultPath": "$.waitSeconds",
+      "Comment": "Sets the waitSeconds parameter to 24 hours (86400) if not specified"
+    },
+    "Wait": {
+      "Type": "Wait",
+      "Comment": "Wait for waitSeconds parameter duration",
+      "Next": "DescribeHosts",
+      "SecondsPath": "$.waitSeconds"
+    },
+    "DescribeHosts": {
+      "Type": "Task",
+      "Next": "Hosts Map",
+      "Parameters": {
+        "HostIds.$": "$.targetHosts"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeHosts",
+      "ResultPath": "$.describeResults"
+    },
+    "Hosts Map": {
+      "Type": "Map",
+      "Next": "ReleaseHosts",
+      "Iterator": {
+        "StartAt": "Tags Map",
+        "States": {
+          "Tags Map": {
+            "Type": "Map",
+            "End": true,
+            "Iterator": {
+              "StartAt": "Preserve Tag Check",
+              "States": {
+                "Preserve Tag Check": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Or": [
+                        {
+                          "Variable": "$.Key",
+                          "StringMatches": "preserve"
+                        },
+                        {
+                          "Variable": "$.Key",
+                          "StringMatches": "Preserve"
+                        },
+                        {
+                          "Variable": "$.Key",
+                          "StringMatches": "PRESERVE"
+                        }
+                      ],
+                      "Next": "Preserved"
+                    }
+                  ],
+                  "Default": "Non-preserved",
+                  "Comment": "Check whether the preserve tag is present"
+                },
+                "Preserved": {
+                  "Type": "Fail",
+                  "Error": "Preserve",
+                  "Cause": "Host tagged with preserve"
+                },
+                "Non-preserved": {
+                  "Type": "Succeed"
+                }
+              }
+            },
+            "ItemsPath": "$.Tags"
+          }
+        }
+      },
+      "ItemsPath": "$.describeResults.Hosts",
+      "ResultPath": "$.preserveCheckResults"
+    },
+    "ReleaseHosts": {
+      "Type": "Task",
+      "Parameters": {
+        "HostIds.$": "$.targetHosts"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ec2:releaseHosts",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "BackoffRate": 2,
+          "IntervalSeconds": 60,
+          "MaxAttempts": 10,
+          "Comment": "Retry x10 1m+"
+        }
+      ],
+      "Next": "Unsuccessful Check",
+      "ResultPath": "$.releaseResults"
+    },
+    "Unsuccessful Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.releaseResults.Unsuccessful[0]",
+          "IsPresent": true,
+          "Next": "Unsuccessful"
+        }
+      ],
+      "Default": "Successful",
+      "Comment": "Check if ReleaseHosts contains any 'Unsuccessful' entries"
+    },
+    "Unsuccessful": {
+      "Type": "Fail",
+      "Error": "ReleaseHost failed",
+      "Cause": "Non-empty 'Unsuccessful' array in ReleaseHosts reponse",
+      "Comment": "This won't be caught by Step Function's error handling apparently"
+    },
+    "Successful": {
+      "Type": "Succeed"
+    }
+  }
+}

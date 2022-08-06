@@ -1,0 +1,16 @@
+name: Lint SAM template
+
+on: [pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    container:
+      image: us-central1-docker.pkg.dev/phurl-public-docker/github-actions/actions-cfn-lint:latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v2
+      - name: Lint CloudFormation templates
+        run: |
+          cfn-lint --version
+          cfn-lint --include-checks I -t template.yaml
