@@ -13,4 +13,4 @@ jobs:
       - name: Lint CloudFormation templates
         run: |
           cfn-lint --version
-          cfn-lint --include-checks I template.yaml
+          cfn-lint --include-checks I -t template.yaml
