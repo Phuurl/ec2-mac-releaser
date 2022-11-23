@@ -37,13 +37,12 @@
     },
     "Hosts Map": {
       "Type": "Map",
-      "Next": "ReleaseHosts",
+      "Next": "terminateInstances presence check",
       "Iterator": {
         "StartAt": "Tags Map",
         "States": {
           "Tags Map": {
             "Type": "Map",
-            "End": true,
             "Iterator": {
               "StartAt": "Preserve Tag Check",
               "States": {
@@ -81,12 +80,176 @@
                 }
               }
             },
-            "ItemsPath": "$.Tags"
+            "ItemsPath": "$.Tags",
+            "ResultPath": null,
+            "End": true
           }
         }
       },
       "ItemsPath": "$.describeResults.Hosts",
       "ResultPath": "$.preserveCheckResults"
+    },
+    "terminateInstances presence check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.terminateInstances",
+          "IsPresent": true,
+          "Next": "terminateInstances Check"
+        }
+      ],
+      "Default": "terminateInstances false default"
+    },
+    "terminateInstances false default": {
+      "Type": "Pass",
+      "Next": "terminateInstances Check",
+      "Result": false,
+      "ResultPath": "$.terminateInstances",
+      "Comment": "Sets the terminateInstances parameter to false if not specified"
+    },
+    "terminateInstances Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.terminateInstances",
+          "BooleanEquals": true,
+          "Next": "Hosts Map 2"
+        }
+      ],
+      "Default": "ReleaseHosts"
+    },
+    "Hosts Map 2": {
+      "Type": "Map",
+      "Next": "ReleaseHosts",
+      "Iterator": {
+        "StartAt": "DescribeHostInstances",
+        "States": {
+          "DescribeHostInstances": {
+            "Type": "Task",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "host-id",
+                  "Values.$": "States.Array($.HostId)"
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+            "ResultPath": "$.describeInstancesResult",
+            "Next": "ReservationsMap"
+          },
+          "ReservationsMap": {
+            "Type": "Map",
+            "Iterator": {
+              "StartAt": "InstancesMap",
+              "States": {
+                "InstancesMap": {
+                  "Type": "Map",
+                  "End": true,
+                  "Iterator": {
+                    "StartAt": "TerminateInstances",
+                    "States": {
+                      "TerminateInstances": {
+                        "Type": "Task",
+                        "Parameters": {
+                          "InstanceIds.$": "States.Array($.InstanceId)"
+                        },
+                        "Resource": "arn:aws:states:::aws-sdk:ec2:terminateInstances",
+                        "ResultPath": null,
+                        "Next": "TerminateWait"
+                      },
+                      "TerminateWait": {
+                        "Type": "Wait",
+                        "Seconds": 60,
+                        "Next": "DescribeTerminatedInstance",
+                        "Comment": "Wait for 60s for instance to terminate"
+                      },
+                      "DescribeTerminatedInstance": {
+                        "Type": "Task",
+                        "Parameters": {
+                          "InstanceIds.$": "States.Array($.InstanceId)"
+                        },
+                        "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+                        "Next": "Instance State Check",
+                        "Comment": "Get target instance state"
+                      },
+                      "Instance State Check": {
+                        "Type": "Choice",
+                        "Choices": [
+                          {
+                            "Or": [
+                              {
+                                "Variable": "$.Reservations[0].Instances[0].State.Name",
+                                "StringEquals": "stopping"
+                              },
+                              {
+                                "Variable": "$.Reservations[0].Instances[0].State.Name",
+                                "StringEquals": "shutting-down"
+                              }
+                            ],
+                            "Comment": "Still terminating",
+                            "Next": "TerminateWait 2"
+                          },
+                          {
+                            "And": [
+                              {
+                                "Not": {
+                                  "Variable": "$.Reservations[0].Instances[0].State.Name",
+                                  "StringEquals": "stopping"
+                                }
+                              },
+                              {
+                                "Not": {
+                                  "Variable": "$.Reservations[0].Instances[0].State.Name",
+                                  "StringEquals": "shutting-down"
+                                }
+                              },
+                              {
+                                "Not": {
+                                  "Variable": "$.Reservations[0].Instances[0].State.Name",
+                                  "StringEquals": "terminated"
+                                }
+                              }
+                            ],
+                            "Comment": "Bad state",
+                            "Next": "Fail"
+                          }
+                        ],
+                        "Default": "Success"
+                      },
+                      "Fail": {
+                        "Type": "Fail"
+                      },
+                      "Success": {
+                        "Type": "Succeed",
+                        "Comment": "Terminated"
+                      },
+                      "TerminateWait 2": {
+                        "Type": "Wait",
+                        "Seconds": 60,
+                        "Next": "DescribeTerminatedInstance 2"
+                      },
+                      "DescribeTerminatedInstance 2": {
+                        "Type": "Task",
+                        "Parameters": {
+                          "InstanceIds.$": "States.Array($.Reservations[0].Instances[0].InstanceId)"
+                        },
+                        "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+                        "Next": "Instance State Check"
+                      }
+                    }
+                  },
+                  "ItemsPath": "$.Instances"
+                }
+              }
+            },
+            "ItemsPath": "$.describeInstancesResult.Reservations",
+            "End": true
+          }
+        }
+      },
+      "ItemsPath": "$.describeResults.Hosts",
+      "ResultPath": null
     },
     "ReleaseHosts": {
       "Type": "Task",

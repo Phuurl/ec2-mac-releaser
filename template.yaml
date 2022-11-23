@@ -3,6 +3,20 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   Step Function to automatically release created mac1/mac2 dedicated hosts after 24hrs (the minimum for Mac instances)
 
+Parameters:
+  TerminateInstances:
+    Type: String
+    Description: "Whether to terminate instances on that target host. true/false"
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+Conditions:
+  TerminateInstancesCondition: !Equals
+    - !Ref TerminateInstances
+    - "true"
+
 Resources:
   LogGroup: 
     Type: AWS::Logs::LogGroup
@@ -27,8 +41,17 @@ Resources:
               Action:
                 - ec2:DescribeHosts
                 - ec2:DescribeHostReservations
-                - ec2:ReleaseHosts
+                - ec2:DescribeInstances
               Resource: "*"
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:TerminateInstances
+                - ec2:ReleaseHosts
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:dedicated-host/*"
+                - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*"
         - Version: "2012-10-17"
           Statement:
             - Effect: Allow
@@ -93,12 +116,22 @@ Resources:
           InputTransformer:
             InputPathsMap:
               hosts: "$.detail.responseElements.AllocateHostsResponse.hostIdSet.item"
-            InputTemplate: |
-              {
-                "targetHosts": [
-                  <hosts>
-                ]
-              }
+            InputTemplate: !If
+              - TerminateInstancesCondition
+              - |
+                  {
+                    "targetHosts": [
+                      <hosts>
+                    ],
+                    "terminateInstances": true
+                  }
+              - |
+                  {
+                    "targetHosts": [
+                      <hosts>
+                    ],
+                    "terminateInstances": false
+                  }
 
 Outputs:
   HostReleaseStepFunctionArn:
