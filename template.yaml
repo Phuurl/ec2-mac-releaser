@@ -104,6 +104,7 @@ Resources:
                 - mac1.metal
                 - mac2.metal
                 - mac2-m2.metal
+                - mac2-m2pro.metal
           responseElements:
             AllocateHostsResponse:
               hostIdSet:
