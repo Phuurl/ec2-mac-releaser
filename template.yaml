@@ -103,6 +103,7 @@ Resources:
               InstanceType:
                 - mac1.metal
                 - mac2.metal
+                - mac2-m2.metal
           responseElements:
             AllocateHostsResponse:
               hostIdSet:
